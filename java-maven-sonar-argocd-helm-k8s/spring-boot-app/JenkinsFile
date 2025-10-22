@@ -3,16 +3,24 @@ pipeline {
 
     environment {
         SONAR_URL = "http://98.83.209.213:9000"
+        DOCKER_REGISTRY = "docker.io"
+        DOCKER_USER = "mohan0900"
         GIT_REPO_NAME = "Jenkins-Zero-To-Hero-Mohan"
         GIT_USER_NAME = "mohan0900"
-        DOCKER_IMAGE = "mohan0900/spring-boot-app:${BUILD_NUMBER}"
     }
 
     stages {
+        stage('Prepare Workspace') {
+            steps {
+                echo "Cleaning workspace and fixing permissions..."
+                sh 'rm -rf java-maven-sonar-argocd-helm-k8s/spring-boot-app/target || true'
+                sh 'chown -R $(whoami):$(whoami) . || true'
+            }
+        }
 
         stage('Checkout') {
             steps {
-                git branch: 'main', 
+                git branch: 'main',
                     url: 'https://github.com/mohan0900/Jenkins-Zero-To-Hero-Mohan.git'
             }
         }
@@ -21,7 +29,7 @@ pipeline {
             agent {
                 docker {
                     image 'maven:3.9.9-eclipse-temurin-17'
-                    args '--user root'
+                    args '-v /var/run/docker.sock:/var/run/docker.sock' // mount Docker socket
                 }
             }
             steps {
@@ -33,12 +41,6 @@ pipeline {
         }
 
         stage('Static Code Analysis') {
-            agent {
-                docker {
-                    image 'maven:3.9.9-eclipse-temurin-17'
-                    args '--user root'
-                }
-            }
             steps {
                 withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
                     sh '''
@@ -51,12 +53,13 @@ pipeline {
 
         stage('Build and Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh '''
                         cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-                        docker build -t ${DOCKER_IMAGE} .
-                        echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
-                        docker push ${DOCKER_IMAGE}
+                        DOCKER_IMAGE=${DOCKER_USER}/spring-boot-app:${BUILD_NUMBER}
+                        docker build -t $DOCKER_IMAGE .
+                        echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                        docker push $DOCKER_IMAGE
                     '''
                 }
             }
@@ -68,6 +71,7 @@ pipeline {
                     sh '''
                         git config user.email "mohan0900@gmail.com"
                         git config user.name "Mohan Raj"
+                        BUILD_NUMBER=${BUILD_NUMBER}
                         sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
                         git add java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
                         git commit -m "Update deployment image to version ${BUILD_NUMBER}"
@@ -75,6 +79,19 @@ pipeline {
                     '''
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline finished. Cleaning up Docker containers..."
+            sh 'docker ps -a -q | xargs -r docker rm -f || true'
+        }
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed. Check logs for errors."
         }
     }
 }
