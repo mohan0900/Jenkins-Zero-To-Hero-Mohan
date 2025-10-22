@@ -1,20 +1,4 @@
 pipeline {
-  agent any
-  stages {
-    stage('Cleanup Workspace') {
-      steps {
-        cleanWs()
-      }
-    }
-    stage('Checkout') {
-      steps {
-        git branch: 'main', url: 'https://github.com/mohan0900/Jenkins-Zero-To-Hero-Mohan.git'
-      }
-    }
-    ...
-  }
-}
-pipeline {
   agent {
     docker {
       image 'mohan0900/maven-mohan-docker-agent:v1'
